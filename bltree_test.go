@@ -420,7 +420,3 @@ func TestBLTree_restart(t *testing.T) {
 		}
 	}
 }
-
-// TODO: 存在する db ファイルを用いた起動 & 操作テスト
-// TODO: 削除テスト
-// TODO: page0の書き出しテスト

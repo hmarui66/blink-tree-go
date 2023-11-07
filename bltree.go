@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"sync/atomic"
 )
 
@@ -407,8 +406,6 @@ func (tree *BLTree) cleanPage(set *PageSet, keyLen uint8, slot uint32, valLen ui
 		return slot
 	}
 
-	log.Printf("execute cleaning!!! page.Min = %d\n", page.Min)
-
 	// skip cleanup and proceed to split
 	// if there's not enough garbage to bother with.
 	if page.Garbage < nxt/5 {
@@ -552,8 +549,6 @@ func (tree *BLTree) splitPage(set *PageSet) uint {
 	cnt := max / 2
 	idx := uint32(0)
 
-	log.Printf("DEBUG: splitPage max = %d\n", max)
-
 	for cnt < max {
 		cnt++
 		if cnt < max || set.page.Lvl > 0 {
@@ -593,7 +588,6 @@ func (tree *BLTree) splitPage(set *PageSet) uint {
 	frame.Min = nxt
 	frame.Cnt = idx
 	frame.Lvl = lvl
-	log.Printf("DEBUG: splitPage frame = %v\n", frame)
 
 	// link right node
 	if set.latch.pageNo > RootPage {
@@ -712,7 +706,6 @@ func (tree *BLTree) insertSlot(
 	typ SlotType,
 	release bool,
 ) BLTErr {
-	log.Printf("insertSlot: pageNo = %v, slot = %v, key = %v, pageCnt = %v\n", set.latch.pageNo, slot, key, set.page.Cnt)
 	// if found slot > desired slot and previous slot is a librarian slot, use it
 	if slot > 1 {
 		if set.page.Typ(slot-1) == Librarian {
@@ -722,12 +715,10 @@ func (tree *BLTree) insertSlot(
 
 	// copy value onto page
 	set.page.Min -= BtId + 1
-	log.Printf("on value page.Min = %d\n", set.page.Min)
 	copy(set.page.Data[set.page.Min:], append([]byte{byte(len(value))}, value[:]...))
 
 	// copy key onto page
 	set.page.Min -= uint32(len(key) + 1)
-	log.Printf("on key page.Min = %d\n", set.page.Min)
 	copy(set.page.Data[set.page.Min:], append([]byte{byte(len(key))}, key[:]...))
 
 	// find first empty slot
@@ -767,7 +758,6 @@ func (tree *BLTree) insertSlot(
 	}
 
 	// fill in new slot
-	log.Printf("DEBUG: insertSlot slot = %v, keyOffset = %v\n", slot, set.page.Min)
 	set.page.SetKeyOffset(slot, set.page.Min)
 	set.page.SetTyp(slot, typ)
 	set.page.SetDead(slot, false)
@@ -788,7 +778,6 @@ func (tree *BLTree) newDup() uid {
 
 // insertKey insert new key into the btree at given level. either add a new key or update/add an existing one
 func (tree *BLTree) insertKey(key []byte, lvl uint8, value [BtId]byte, uniq bool) BLTErr {
-	log.Println("start inset key")
 	var slot uint32
 	var keyLen uint8
 	var set PageSet
@@ -809,9 +798,7 @@ func (tree *BLTree) insertKey(key []byte, lvl uint8, value [BtId]byte, uniq bool
 	}
 
 	for {
-		log.Println("\tstart for loop")
 		slot = tree.mgr.LoadPage(&set, key, lvl, LockWrite, &tree.reads, &tree.writes)
-		log.Printf("\tslot: %d, page : %d\n", slot, set.latch.pageNo)
 		if slot > 0 {
 			ptr = set.page.Key(slot)
 		} else {
@@ -835,21 +822,14 @@ func (tree *BLTree) insertKey(key []byte, lvl uint8, value [BtId]byte, uniq bool
 			keyLen -= BtId
 		}
 
-		log.Printf("\t inserting a duplicate key or unique key\n")
 		// if inserting a duplicate key or unique key
 		//   check for adequate space on the page
 		//   and insert the new key before slot.
-		log.Printf("\tcondition: %t\n", uniq && (keyLen != uint8(len(ins)) || KeyCmp(ptr, ins) != 0))
-		log.Printf("\tcondition keyLen check: %t, keyLen = %d, len(ins) = %d\n", keyLen != uint8(len(ins)), keyLen, len(ins))
-		log.Printf("\tcondition keyLen check, ptr = %v, ins = %v\n", ptr, ins)
-		log.Printf("\tcondition keycmp: %d\n", KeyCmp(ptr, ins))
 
 		if (uniq && (keyLen != uint8(len(ins)) || KeyCmp(ptr, ins) != 0)) || !uniq {
 			slot = tree.cleanPage(&set, uint8(len(ins)), slot, BtId)
-			log.Printf("\t cleapage slot: %d\n", slot)
 			if slot == 0 {
 				entry := tree.splitPage(&set)
-				log.Printf("\t split page entry: %d\n", entry)
 				if entry == 0 {
 					return tree.err
 				} else if err := tree.splitKeys(&set, &tree.mgr.latchSets[entry]); err != BLTErrOk {
@@ -858,10 +838,8 @@ func (tree *BLTree) insertKey(key []byte, lvl uint8, value [BtId]byte, uniq bool
 					continue
 				}
 			}
-			log.Printf("\t insertSlot: %d\n", slot)
 			return tree.insertSlot(&set, slot, ins, value, typ, true)
 		}
-		log.Printf("\t if key already exists, update value and return\n")
 
 		// if key already exists, update value and return
 		// Note: omit if-block for always true condition

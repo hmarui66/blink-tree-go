@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"log"
 	"os"
 	"sync/atomic"
 	"syscall"
@@ -41,6 +40,7 @@ func (z *PageZero) AllocRight() *[BtId]byte {
 	rightStart := 4*4 + 1 + 1 + 1 + 1
 	return (*[6]byte)(z.alloc[rightStart : rightStart+6])
 }
+
 func (z *PageZero) SetAllocRight(pageNo uid) {
 	PutID(z.AllocRight(), pageNo)
 }
@@ -76,22 +76,19 @@ func NewBufMgr(name string, bits uint8, nodeMax uint) *BufMgr {
 	//  check if bits == 0 on the disk.
 	if size, err := mgr.idx.Seek(0, io.SeekEnd); size > 0 && err == nil {
 		pageBytes := make([]byte, BtMinPage)
+
 		if n, err := mgr.idx.ReadAt(pageBytes, 0); err == nil && n == BtMinPage {
-			reader := bytes.NewReader(pageBytes)
-			// TODO: []byte から Page への変換処理実装時に修正
-			// uint64 * 4つ分を読み捨てる
-			_, err = reader.Read(make([]byte, 8*4))
-			if err != nil {
+			var page Page
+
+			if err := binary.Read(bytes.NewReader(pageBytes), binary.LittleEndian, &page.PageHeader); err != nil {
 				errPrintf("Unable to read btree file: %v\n", err)
 				return nil
 			}
+			page.Data = pageBytes[PageHeaderSize:]
 
-			b := make([]byte, 1)
-			if _, err := reader.Read(b); err == nil {
-				if b[0] != 0 {
-					bits = b[0]
-					initit = false
-				}
+			if page.Bits > 0 {
+				bits = page.Bits
+				initit = false
 			}
 		}
 	}
@@ -99,7 +96,6 @@ func NewBufMgr(name string, bits uint8, nodeMax uint) *BufMgr {
 	mgr.pageSize = 1 << bits
 	mgr.pageBits = bits
 	mgr.pageDataSize = mgr.pageSize - PageHeaderSize
-	log.Printf("DEBUG: page size: %d\n", mgr.pageSize)
 
 	// calculate number of latch hash table entries
 	// Note: in original code, calculate using HashEntry size
@@ -127,7 +123,6 @@ func NewBufMgr(name string, bits uint8, nodeMax uint) *BufMgr {
 			if lvl > 0 {   // only page 0
 				z += BtId
 			}
-			log.Printf("DEBUG: initial keyOffset = %d\n", mgr.pageDataSize-3-z)
 			alloc.SetKeyOffset(1, mgr.pageDataSize-3-z)
 			// create stopper key
 			alloc.SetKey([]byte{0xff, 0xff}, 1)
@@ -175,10 +170,6 @@ func NewBufMgr(name string, bits uint8, nodeMax uint) *BufMgr {
 
 func (mgr *BufMgr) readPage(page *Page, pageNo uid) BLTErr {
 	off := pageNo << mgr.pageBits
-
-	log.Printf("DEBUG: readPage: off: %d\n", off)
-	stat, _ := mgr.idx.Stat()
-	log.Printf("DEBUG: readPage: file stat: %#v\n", stat)
 
 	pageBytes := make([]byte, mgr.pageSize)
 	if n, err := mgr.idx.ReadAt(pageBytes, int64(off)); err != nil || n < int(mgr.pageSize) {
@@ -317,7 +308,6 @@ func (mgr *BufMgr) MapPage(latch *LatchSet) *Page {
 
 // PinLatch pins a page in the buffer pool
 func (mgr *BufMgr) PinLatch(pageNo uid, loadIt bool, reads *uint, writes *uint) *LatchSet {
-	log.Printf("DEBUG: start pin latch\n")
 	hashIdx := uint(pageNo) % mgr.latchHash
 
 	// try to find our entry
@@ -325,7 +315,6 @@ func (mgr *BufMgr) PinLatch(pageNo uid, loadIt bool, reads *uint, writes *uint) 
 	defer mgr.hashTable[hashIdx].latch.SpinReleaseWrite()
 
 	slot := mgr.hashTable[hashIdx].slot
-	log.Printf("DEBUG: hashTable slot = %d\n", slot)
 	for slot > 0 {
 		latch := &mgr.latchSets[slot]
 		if latch.pageNo == pageNo {
@@ -336,7 +325,6 @@ func (mgr *BufMgr) PinLatch(pageNo uid, loadIt bool, reads *uint, writes *uint) 
 
 	// found our entry increment clock
 	if slot > 0 {
-		log.Printf("DEBUG: found slot = %d\n", slot)
 		latch := &mgr.latchSets[slot]
 		atomic.AddUint32(&latch.pin, 1)
 
@@ -346,9 +334,7 @@ func (mgr *BufMgr) PinLatch(pageNo uid, loadIt bool, reads *uint, writes *uint) 
 	// see if there are any unused pool entries
 
 	slot = uint(atomic.AddUint32(&mgr.latchDeployed, 1))
-	log.Printf("DEBUG: search unused slot = %d\n", slot)
 	if slot < mgr.latchTotal {
-		log.Printf("DEBUG: searched unused slot = %d\n", slot)
 		latch := &mgr.latchSets[slot]
 		if mgr.latchLink(hashIdx, slot, pageNo, loadIt, reads) != BLTErrOk {
 			return nil
@@ -359,7 +345,6 @@ func (mgr *BufMgr) PinLatch(pageNo uid, loadIt bool, reads *uint, writes *uint) 
 
 	atomic.AddUint32(&mgr.latchDeployed, DECREMENT)
 
-	log.Printf("DEBUG: search victim\n")
 	for {
 		slot = uint(atomic.AddUint32(&mgr.latchVictim, 1) - 1)
 
@@ -383,9 +368,7 @@ func (mgr *BufMgr) PinLatch(pageNo uid, loadIt bool, reads *uint, writes *uint) 
 
 		// skip this slot if it is pinned or the CLOCK bit is set
 		if latch.pin > 0 {
-			log.Printf("DEBUG: skip this slot = %d, pageNo %d, pin %d\n", slot, latch.pageNo, latch.pin)
 			if latch.pin&ClockBit > 0 {
-				log.Printf("DEBUG: drop ClockBit slot = %d\n", slot)
 				FetchAndAndUint32(&latch.pin, ^ClockBit)
 			}
 			mgr.hashTable[idx].latch.SpinReleaseWrite()
@@ -396,7 +379,6 @@ func (mgr *BufMgr) PinLatch(pageNo uid, loadIt bool, reads *uint, writes *uint) 
 		page := mgr.pagePool[slot]
 
 		if latch.dirty {
-			log.Printf("DEBUG: dirty pageNo = %d\n", latch.pageNo)
 			if err := mgr.writePage(&page, latch.pageNo); err != BLTErrOk {
 				return nil
 			} else {
@@ -432,7 +414,6 @@ func (mgr *BufMgr) UnpinLatch(latch *LatchSet) {
 		FetchAndOrUint32(&latch.pin, ClockBit)
 	}
 	atomic.AddUint32(&latch.pin, DECREMENT)
-	log.Printf("DEBUG: unpin pageNo = %d, pin = %d\n", latch.pageNo, latch.pin)
 }
 
 // NewPage allocate a new page
@@ -502,9 +483,7 @@ func (mgr *BufMgr) LoadPage(set *PageSet, key []byte, lvl uint8, lock BLTLockMod
 			mode = LockRead
 		}
 
-		log.Printf("DEBUG: pinning pageNo = %d\n", pageNo)
 		set.latch = mgr.PinLatch(pageNo, true, reads, writes)
-		log.Printf("DEBUG: pinned latch. pageNo = %d\n", set.latch.pageNo)
 		if set.latch == nil {
 			return 0
 		}
@@ -516,12 +495,9 @@ func (mgr *BufMgr) LoadPage(set *PageSet, key []byte, lvl uint8, lock BLTLockMod
 
 		set.page = mgr.MapPage(set.latch)
 
-		log.Printf("DEBUG: release & unpin parent page. prevPage: %d\n", prevPage)
 		// release & unpin parent page
 		if prevPage > 0 {
-			log.Printf("DEBUG: UnlockPage. prevMode = %v\n", prevMode)
 			mgr.UnlockPage(prevMode, prevLatch)
-			log.Printf("DEBUG: UnpinLatch\n")
 			mgr.UnpinLatch(prevLatch)
 			prevPage = uid(0)
 		}
@@ -535,7 +511,6 @@ func (mgr *BufMgr) LoadPage(set *PageSet, key []byte, lvl uint8, lock BLTLockMod
 		//		}
 		//	}
 		//}
-		log.Printf("DEBUG: LockPage. mode = %v, page = %d\n", mode, set.latch.pageNo)
 
 		// obtain mode lock using lock chaining through AccessLock
 		mgr.LockPage(mode, set.latch)
@@ -545,7 +520,6 @@ func (mgr *BufMgr) LoadPage(set *PageSet, key []byte, lvl uint8, lock BLTLockMod
 		//	set->latch->atomictid = pthread_self();
 		//}
 
-		log.Printf("DEBUG: Locked!. mode = %v\n", mode)
 		if set.page.Free {
 			mgr.err = BLTErrStruct
 			return 0
@@ -555,7 +529,6 @@ func (mgr *BufMgr) LoadPage(set *PageSet, key []byte, lvl uint8, lock BLTLockMod
 			mgr.UnlockPage(LockAccess, set.latch)
 		}
 
-		log.Printf("DEBUG: re-read and re-lock root after determining actual level of root. lvl: %d, drill: %d\n", set.page.Lvl, drill)
 		// re-read and re-lock root after determining actual level of root
 		if set.page.Lvl != drill {
 			if set.latch.pageNo != RootPage {
@@ -564,10 +537,8 @@ func (mgr *BufMgr) LoadPage(set *PageSet, key []byte, lvl uint8, lock BLTLockMod
 			}
 
 			drill = set.page.Lvl
-			log.Printf("DEBUG: drill = %v\n", drill)
 
 			if lock != LockRead && drill == lvl {
-				log.Printf("DEBUG: UnlockPage. mode = %v\n", mode)
 				mgr.UnlockPage(mode, set.latch)
 				mgr.UnpinLatch(set.latch)
 				continue
@@ -584,11 +555,8 @@ func (mgr *BufMgr) LoadPage(set *PageSet, key []byte, lvl uint8, lock BLTLockMod
 			goto sliderRight
 		}
 
-		log.Printf("DEBUG: set.page.FindSlot(key)\n")
 		slot = set.page.FindSlot(key)
-		log.Printf("DEBUG: slot = %d\n", slot)
 		if slot > 0 {
-			log.Printf("DEBUG: drill = %d, lvl = %d\n", drill, lvl)
 			if drill == lvl {
 				return slot
 			}
@@ -603,8 +571,6 @@ func (mgr *BufMgr) LoadPage(set *PageSet, key []byte, lvl uint8, lock BLTLockMod
 			}
 
 			pageNo = GetIDFromValue(set.page.Value(slot))
-			log.Printf("DEBUG: GetIDFromValue pageNo = %d\n", pageNo)
-			log.Printf("DEBUG: page.ValueOffset: %d\n", set.page.ValueOffset(slot))
 			drill--
 			continue
 		}
@@ -646,7 +612,6 @@ func (mgr *BufMgr) FreePage(set *PageSet) {
 //
 // place write, read, or parent lock on requested page_no
 func (mgr *BufMgr) LockPage(mode BLTLockMode, latch *LatchSet) {
-	log.Printf("DEBUG: starting LockPage. mode = %v, page = %d\n", mode, latch.pageNo)
 	switch mode {
 	case LockRead:
 		latch.readWr.ReadLock()
@@ -663,7 +628,6 @@ func (mgr *BufMgr) LockPage(mode BLTLockMode, latch *LatchSet) {
 }
 
 func (mgr *BufMgr) UnlockPage(mode BLTLockMode, latch *LatchSet) {
-	log.Printf("DEBUG: starting UnlockPage. mode = %v, page = %d\n", mode, latch.pageNo)
 	switch mode {
 	case LockRead:
 		latch.readWr.ReadRelease()
@@ -678,63 +642,4 @@ func (mgr *BufMgr) UnlockPage(mode BLTLockMode, latch *LatchSet) {
 		//case LockAtomic: // Note: not supported in this golang implementation
 	}
 
-}
-
-//idx, _ := os.OpenFile("hello", os.O_RDWR|os.O_CREATE, 0666)
-//b := make([]byte, 2)
-//if n, err := idx.ReadAt(b, 2); err != nil {
-//	log.Panicf("Unable to read btree file: %v", err)
-//} else {
-//	log.Printf("read %d bytes", n)
-//}
-//println("here")
-//bufMgr := NewBufMgr("data/hello", 15, 100)
-//
-//page := Page{}
-//bufMgr.readPage(&page, 0)
-//log.Printf("page: %v\n", page)
-
-//buf := bytes.NewBuffer(make([]byte, 0, 10))
-//log.Printf("buf: %v\n", buf)
-//log.Println(buf)
-//if err := binary.Write(buf, binary.LittleEndian, uint64(1)); err != nil {
-//	log.Printf("err: %v\n", err)
-//}
-//buf.Write(make([]byte, 10-buf.Len()))
-//for i := range buf.Bytes() {
-//	log.Printf("buf[%d]: %v\n", i, buf.Bytes()[i])
-//}
-//log.Println(buf)
-//log.Printf("buf: %v\n", buf)
-//var v BLTVal
-//z := uint(unsafe.Sizeof(v))
-//log.Printf("%d\n", z)
-//
-//v.value = make([]byte, 10)
-//z = uint(unsafe.Sizeof(v))
-//log.Printf("%d\n", z)
-//
-//v2 := make([]byte, 10)
-//z = uint(unsafe.Sizeof(v2))
-//log.Printf("%d\n", z)
-//
-//idx, _ := os.OpenFile("hello", os.O_RDWR|os.O_CREATE, 0666)
-//if err := binary.Write(idx, binary.LittleEndian, v2); err != nil {
-//	log.Printf("err: %v\n", err)
-//}
-
-//hashTable := make([]HashEntry, 2)
-//log.Printf("hashTable: %v\n", hashTable)
-//
-//var slot Slot
-//buf := bytes.NewBuffer(make([]byte, 0, 10))
-//binary.Write(buf, binary.LittleEndian, slot)
-//log.Printf("buf: %v, len: %d\n", buf, buf.Len())
-
-func main() {
-	bufMgr := NewBufMgr("data/hello", 15, 100)
-
-	page := Page{}
-	bufMgr.readPage(&page, 1)
-	log.Printf("page: %v\n", page)
 }

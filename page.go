@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"log"
 )
 
 // SlotType
@@ -129,15 +128,6 @@ func (p *Page) SetKey(bytes []byte, slot uint32) {
 }
 
 func (p *Page) Key(slot uint32) []byte {
-	if slot == 2057 {
-		log.Println("slot 2057")
-		log.Printf("Data: %v\n", p.Data)
-		off := p.KeyOffset(slot)
-		log.Printf("2057 off: %v\n", off)
-		log.Printf("2056 off: %v\n", p.KeyOffset(slot-1))
-		log.Printf("2058 off: %v\n", p.KeyOffset(slot+1))
-		log.Printf("2059 off: %v\n", p.KeyOffset(slot+2))
-	}
 	off := p.KeyOffset(slot)
 	keyLen := uint32(p.Data[off])
 	return p.Data[off+1 : off+1+keyLen]
@@ -194,7 +184,6 @@ func (p *Page) FindSlot(key []byte) uint32 {
 	diff := higher - low
 	for diff > 0 {
 		slot = low + diff>>1
-		log.Printf("key: %#v, slot: %d, higher: %d, low: %d, diff: %d\n", key, slot, higher, low, diff)
 		if KeyCmp(p.Key(slot), key) < 0 {
 			low = slot + 1
 		} else {

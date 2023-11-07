@@ -80,7 +80,7 @@ func TestBLTree_t(t *testing.T) {
 	t.Log(res)
 }
 
-func TestBLTree_inset_and_find(t *testing.T) {
+func TestBLTree_insert_and_find(t *testing.T) {
 	mgr := NewBufMgr("data/bltree_insert_and_find.db", 15, 20)
 	bltree := NewBLTree(mgr)
 	if valLen, _, _ := bltree.findKey([]byte{1, 1, 1, 1}, BtId); valLen >= 0 {

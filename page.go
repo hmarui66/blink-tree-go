@@ -89,6 +89,9 @@ func (p *Page) ClearSlot(slot uint32) {
 }
 
 func (p *Page) SetKeyOffset(slot uint32, offset uint32) {
+	if offset > 32767 {
+		panic("offset is too big")
+	}
 	slotBytes := p.slotBytes(slot)
 	binary.LittleEndian.PutUint32(slotBytes, offset)
 }
@@ -130,7 +133,9 @@ func (p *Page) SetKey(bytes []byte, slot uint32) {
 func (p *Page) Key(slot uint32) []byte {
 	off := p.KeyOffset(slot)
 	keyLen := uint32(p.Data[off])
-	return p.Data[off+1 : off+1+keyLen]
+	res := make([]byte, keyLen)
+	copy(res, p.Data[off+1:off+1+keyLen])
+	return res
 }
 
 func (p *Page) ValueOffset(slot uint32) uint32 {
@@ -148,22 +153,9 @@ func (p *Page) SetValue(bytes []byte, slot uint32) {
 func (p *Page) Value(slot uint32) *[]byte {
 	off := p.ValueOffset(slot)
 	valLen := uint32(p.Data[off])
-	val := p.Data[off+1 : off+1+valLen]
-	return &val
-}
-
-func (p *Page) setContents(contents *Page) {
-	p.Cnt = contents.Cnt
-	p.Act = contents.Act
-	p.Min = contents.Min
-	p.Garbage = contents.Garbage
-	p.Bits = contents.Bits
-	p.Free = contents.Free
-	p.Lvl = contents.Lvl
-	p.Kill = contents.Kill
-	p.Right = contents.Right
-	p.Data = make([]byte, len(contents.Data))
-	copy(p.Data, contents.Data)
+	res := make([]byte, valLen)
+	copy(res, p.Data[off+1:off+1+valLen])
+	return &res
 }
 
 // FindSlot find slot in page for given key at a given level

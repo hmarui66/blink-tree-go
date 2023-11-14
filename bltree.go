@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"sync/atomic"
 )
 
@@ -86,13 +87,13 @@ func (tree *BLTree) fixFence(set *PageSet, lvl uint8) BLTErr {
 	// cache new fence value
 	leftKey := set.page.Key(set.page.Cnt)
 
+	var value [BtId]byte
+	PutID(&value, set.latch.pageNo)
+
 	tree.mgr.LockPage(LockParent, set.latch)
 	tree.mgr.UnlockPage(LockWrite, set.latch)
 
 	// insert new (now smaller) fence key
-
-	var value [BtId]byte
-	PutID(&value, set.latch.pageNo)
 
 	if err := tree.insertKey(leftKey, lvl+1, value, true); err != BLTErrOk {
 		return err
@@ -156,18 +157,23 @@ func (tree *BLTree) collapseRoot(root *PageSet) BLTErr {
 // call with page writelocked
 // returns with page unpinned
 func (tree *BLTree) deletePage(set *PageSet, mode BLTLockMode) BLTErr {
+	log.Printf("deletePage: pageId=%d\n", set.latch.pageNo)
+	log.Printf("deletePage: first key=%d\n", set.page.Key(1))
 	var right PageSet
 	// cache copy of fence key to post in parent
 	lowerFence := set.page.Key(set.page.Cnt)
 
 	// obtain lock on right page
 	pageNo := GetID(&set.page.Right)
+	log.Printf("deletePage: right pageId=%d\n", pageNo)
 	right.latch = tree.mgr.PinLatch(pageNo, true, &tree.reads, &tree.writes)
 	if right.latch != nil {
 		right.page = tree.mgr.MapPage(right.latch)
 	} else {
 		return BLTErrOk
 	}
+
+	log.Printf("deletePage: right page first key=%d\n", right.page.Key(1))
 
 	tree.mgr.LockPage(LockWrite, right.latch)
 	tree.mgr.LockPage(mode, right.latch)
@@ -191,15 +197,16 @@ func (tree *BLTree) deletePage(set *PageSet, mode BLTLockMode) BLTErr {
 	right.latch.dirty = true
 	right.page.Kill = true
 
+	// redirect higher key directly to our new node contents
+	var value [BtId]byte
+	PutID(&value, set.latch.pageNo)
+
 	tree.mgr.LockPage(LockParent, right.latch)
 	tree.mgr.UnlockPage(LockWrite, right.latch)
 	tree.mgr.UnlockPage(mode, right.latch)
 	tree.mgr.LockPage(LockParent, set.latch)
 	tree.mgr.UnlockPage(LockWrite, set.latch)
 
-	// redirect higher key directly to our new node contents
-	var value [BtId]byte
-	PutID(&value, set.latch.pageNo)
 	if err := tree.insertKey(higherFence, set.page.Lvl+1, value, true); err != BLTErrOk {
 		return err
 	}
@@ -241,16 +248,15 @@ func (tree *BLTree) deleteKey(key []byte, lvl uint8) BLTErr {
 	fence := slot == set.page.Cnt
 
 	// if key is found delete it, otherwise ignore request
-	tree.found = KeyCmp(ptr, key) == 0
-	if tree.found {
-		tree.found = !set.page.Dead(slot)
-		if tree.found {
+	found := KeyCmp(ptr, key) == 0
+	if found {
+		found = !set.page.Dead(slot)
+		if found {
 			val := *set.page.Value(slot)
 			set.page.SetDead(slot, true)
 			set.page.Garbage += uint32(1+len(ptr)) + uint32(1+len(val))
 			set.page.Act--
 
-			// collapse empty slots beneath the fence
 			idx := set.page.Cnt - 1
 			for idx > 0 {
 				if set.page.Dead(idx) {
@@ -267,7 +273,8 @@ func (tree *BLTree) deleteKey(key []byte, lvl uint8) BLTErr {
 	}
 
 	// did we delete a fence key in an upper level?
-	if tree.found && lvl > 0 && set.page.Act > 0 && fence {
+	if found && lvl > 0 && set.page.Act > 0 && fence {
+		log.Printf("fixFence in deleteKey. set.latch.pageNo: %d, lvl: %d\n", set.latch.pageNo, lvl)
 		if err := tree.fixFence(&set, lvl); err != BLTErrOk {
 			return err
 		} else {
@@ -277,6 +284,7 @@ func (tree *BLTree) deleteKey(key []byte, lvl uint8) BLTErr {
 
 	// do we need to collapse root?
 	if lvl > 1 && set.latch.pageNo == RootPage && set.page.Act == 1 {
+		log.Printf("collapseRoot in deleteKey. set.latch.pageNo: %d\n", set.latch.pageNo)
 		if err := tree.collapseRoot(&set); err != BLTErrOk {
 			return err
 		} else {
@@ -286,6 +294,7 @@ func (tree *BLTree) deleteKey(key []byte, lvl uint8) BLTErr {
 
 	// delete empty page
 	if set.page.Act == 0 {
+		log.Printf("deletePage in deleteKey. set.latch.pageNo: %d\n", set.latch.pageNo)
 		return tree.deletePage(&set, LockNone)
 	}
 	set.latch.dirty = true
@@ -443,11 +452,17 @@ func (tree *BLTree) cleanPage(set *PageSet, keyLen uint8, slot uint32, valLen ui
 		val := *frame.Value(cnt)
 		nxt -= uint32(len(val) + 1)
 		copy(page.Data[nxt:], append([]byte{byte(len(val))}, val[:]...))
+		if len(val) != 6 && len(val) != 0 {
+			log.Printf("cleanPage: val: %v\n", val)
+		}
 
 		// copy the key across
 		key := frame.Key(cnt)
 		nxt -= uint32(len(key) + 1)
 		copy(page.Data[nxt:], append([]byte{byte(len(key))}, key[:]...))
+		if len(key) != 8 && len(key) != 2 {
+			log.Printf("cleanPage: key: %v\n", key)
+		}
 
 		// make a librarian slot
 		if idx > 0 {
@@ -507,6 +522,9 @@ func (tree *BLTree) splitRoot(root *PageSet, right *LatchSet) BLTErr {
 	nxt -= BtId + 1
 	PutID(&value, right.pageNo)
 	copy(root.page.Data[nxt:], append([]byte{byte(BtId)}, value[:]...))
+	if len(value) != 6 && len(value) != 0 {
+		log.Panicf("splitRoot: value: %v\n", value)
+	}
 
 	nxt -= 2 + 1
 	root.page.SetKeyOffset(2, nxt)
@@ -516,10 +534,16 @@ func (tree *BLTree) splitRoot(root *PageSet, right *LatchSet) BLTErr {
 	nxt -= BtId + 1
 	PutID(&value, leftPageNo)
 	copy(root.page.Data[nxt:], append([]byte{byte(BtId)}, value[:]...))
+	if len(value) != 6 {
+		log.Panicf("splitRoot: value: %v\n", value)
+	}
 
 	nxt -= uint32(len(leftKey)) + 1
 	root.page.SetKeyOffset(1, nxt)
 	copy(root.page.Data[nxt:], append([]byte{byte(len(leftKey))}, leftKey[:]...))
+	if len(leftKey) != 8 && len(leftKey) != 0 {
+		log.Panicf("splitRoot: leftKey: %v\n", leftKey)
+	}
 
 	PutID(&root.page.Right, 0)
 	root.page.Min = nxt
@@ -538,6 +562,7 @@ func (tree *BLTree) splitRoot(root *PageSet, right *LatchSet) BLTErr {
 //
 // split already locked full node; leave it locked.
 // @return pool entry for new right page, unlocked
+// 1: ここがおかしい？
 func (tree *BLTree) splitPage(set *PageSet) uint {
 	nxt := tree.mgr.pageDataSize
 	lvl := set.page.Lvl
@@ -548,6 +573,12 @@ func (tree *BLTree) splitPage(set *PageSet) uint {
 	max := set.page.Cnt
 	cnt := max / 2
 	idx := uint32(0)
+	if set.page.Cnt > 1500 {
+		log.Panicf("set.page.Cnt too big. data: %v\n", set.page.Data)
+	}
+
+	originalPage := NewPage(tree.mgr.pageDataSize)
+	MemCpyPage(originalPage, set.page)
 
 	for cnt < max {
 		cnt++
@@ -556,14 +587,29 @@ func (tree *BLTree) splitPage(set *PageSet) uint {
 				continue
 			}
 		}
+		if set.page.KeyOffset(cnt) > 32767 {
+			log.Printf("splitPage: key offset is too big: %d\n", set.page.KeyOffset(cnt))
+			log.Printf("splitPage: current max: %d, cnt: %d\n", max, cnt)
+			log.Printf("splitPage: originalPage: %v\n", originalPage.Data)
+		}
 		value := *set.page.Value(cnt)
 		valLen := uint32(len(value))
 		nxt -= valLen + 1
 		copy(frame.Data[nxt:], append([]byte{byte(valLen)}, value...))
+		if len(value) != 6 && len(value) != 0 {
+			log.Panicf("splitPage: value: %v\n", value)
+		}
 
 		key := set.page.Key(cnt)
 		nxt -= uint32(len(key)) + 1
 		copy(frame.Data[nxt:], append([]byte{byte(len(key))}, key[:]...))
+		if len(key) != 8 && len(key) != 2 {
+			log.Printf("[splitPage] original max: %d\n", set.page.Cnt)
+			log.Printf("[splitPage] current max: %d, cnt: %d\n", max, cnt)
+			log.Printf("[splitPage] originalPage: %v\n", originalPage.Data)
+			log.Printf("[splitPage] nxt: %d\n", nxt)
+			log.Panicf("[splitPage] key offset: %d, key: %v, data: %v\n", set.page.KeyOffset(cnt), key, set.page.Data)
+		}
 
 		// add librarian slot
 		if idx > 0 {
@@ -623,10 +669,16 @@ func (tree *BLTree) splitPage(set *PageSet) uint {
 		valLen := uint32(len(value))
 		nxt -= valLen + 1
 		copy(set.page.Data[nxt:], append([]byte{byte(valLen)}, value...))
+		if len(value) != 6 && len(value) != 0 {
+			log.Panicf("splitPage: value: %v\n", value)
+		}
 
 		key := frame.Key(cnt)
 		nxt -= uint32(len(key)) + 1
 		copy(set.page.Data[nxt:], append([]byte{byte(len(key))}, key[:]...))
+		if len(key) != 8 && len(key) != 2 {
+			log.Panicf("splitPage: key: %v\n", key)
+		}
 
 		// add librarian slot
 		if idx > 0 {
@@ -714,7 +766,7 @@ func (tree *BLTree) insertSlot(
 	}
 
 	// copy value onto page
-	set.page.Min -= BtId + 1
+	set.page.Min -= uint32(len(value) + 1)
 	copy(set.page.Data[set.page.Min:], append([]byte{byte(len(value))}, value[:]...))
 
 	// copy key onto page
@@ -734,6 +786,9 @@ func (tree *BLTree) insertSlot(
 	if idx == set.page.Cnt {
 		idx += 2
 		set.page.Cnt += 2
+		if set.page.Cnt > 1500 {
+			log.Panicf("set.page.Cnt too big. data: %v\n", set.page.Data)
+		}
 		librarian = 2
 	} else {
 		librarian = 1

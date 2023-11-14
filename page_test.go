@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
+	"log"
+	"os"
 	"testing"
 )
 
@@ -343,4 +346,55 @@ func TestCopyPage(t *testing.T) {
 	if bytes.Compare(set2.page.Data, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}) != 0 {
 		t.Errorf("set2.page.Data = %v, want %v", set2.page.Data, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 	}
+}
+func TestCheckPage(t *testing.T) {
+	f, err := os.OpenFile("data/page.db", os.O_RDWR, 0666)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// ファイルの数値をすべてバイト配列に読み込む
+	// ファイルの内容はすべて文字列で、空白文字で区切られている
+	var data []byte
+	for {
+		var b byte
+		_, err := fmt.Fscanf(f, "%d", &b)
+		if err != nil {
+			break
+		}
+		data = append(data, b)
+	}
+	fmt.Printf("size: %v\n", len(data))
+
+	// バイト配列を先頭から以下のレイアウトで解析する
+	// レイアウトは以下の通り
+	// 1. 4byte: Offset
+	// 2. 1byte: SlotType
+	// 3. 1byte: Dead
+	// Offsetはこのファイルの先頭からのオフセットを表すので、バイト配列のサイズを超える場合は問題があるので、検出すべき
+	// また、ファイルの後半は上記のレイアウトとは異なるデータを入れる領域となるため、Offset値が上記のレイアウトのデータと重複した時点で検出すべき
+	reader := bytes.NewReader(data)
+	slotNum := 0
+	for {
+		var offsetBytes [4]byte
+		var typ SlotType
+		var dead bool
+		if _, err := reader.Read(offsetBytes[:]); err != nil {
+			log.Panicf("invalid offset: %v", err)
+		}
+		if err := binary.Read(reader, binary.LittleEndian, &typ); err != nil {
+			log.Panicf("invalid type: %v", err)
+		}
+		if err := binary.Read(reader, binary.LittleEndian, &dead); err != nil {
+			log.Panicf("invalid dead: %v", err)
+		}
+		slotNum++
+		fmt.Printf("slot: %v, offset: %v, type: %v, dead: %v\n", slotNum, offsetBytes, typ, dead)
+		var offset uint32
+		_ = binary.Read(bytes.NewBuffer(offsetBytes[:]), binary.LittleEndian, &offset)
+		if offset > uint32(len(data)) {
+			log.Panicf("invalid offset: %v", offset)
+		}
+	}
+
 }

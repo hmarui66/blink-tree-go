@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"log"
 	"os"
 	"sync/atomic"
 	"syscall"
@@ -182,6 +183,9 @@ func (mgr *BufMgr) readPage(page *Page, pageNo uid) BLTErr {
 		return BLTErrRead
 	}
 	page.Data = pageBytes[PageHeaderSize:]
+	if len(page.Data) != int(mgr.pageDataSize) {
+		log.Panicf("page.Data size is not equal to mgr.pageDataSize. page.Data size: %d, mgr.pageDataSize: %d", len(page.Data), mgr.pageDataSize)
+	}
 
 	return BLTErrOk
 }
@@ -196,13 +200,17 @@ func (mgr *BufMgr) writePage(page *Page, pageNo uid) BLTErr {
 		errPrintf("Unable to output page header as bytes: %v\n", err)
 		return BLTErrWrite
 	}
+
+	if len(page.Data) != int(mgr.pageDataSize) {
+		log.Panicf("page.Data size is not equal to mgr.pageDataSize. page.Data size: %d, mgr.pageDataSize: %d", len(page.Data), mgr.pageDataSize)
+	}
 	if _, err := buf.Write(page.Data); err != nil {
 		errPrintf("Unable to output page data: %v\n", err)
 		return BLTErrWrite
 	}
-	if buf.Len() < int(mgr.pageSize) {
-		buf.Write(make([]byte, int(mgr.pageSize)-buf.Len()))
-	}
+	//if buf.Len() < int(mgr.pageSize) {
+	//	buf.Write(make([]byte, int(mgr.pageSize)-buf.Len()))
+	//}
 	if _, err := mgr.idx.WriteAt(buf.Bytes(), int64(off)); err != nil {
 		errPrintf("Unable to write btree file: %v\n", err)
 		return BLTErrWrite
@@ -457,7 +465,8 @@ func (mgr *BufMgr) NewPage(set *PageSet, contents *Page, reads *uint, writes *ui
 		return mgr.err
 	}
 
-	set.page.setContents(contents)
+	set.page.Data = make([]byte, mgr.pageDataSize)
+	MemCpyPage(set.page, contents)
 	set.latch.dirty = true
 	mgr.err = BLTErrOk
 	return mgr.err

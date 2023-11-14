@@ -228,13 +228,42 @@ func TestBLTree_delete(t *testing.T) {
 	}
 }
 
+func TestBLTree_delete_test(t *testing.T) {
+	mgr := NewBufMgr("data/bltree_delete.db", 15, 20)
+	bltree := NewBLTree(mgr)
+
+	key := []byte{1, 1, 1, 1}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		if err := bltree.insertKey(key, 0, [BtId]byte{0, 0, 0, 0, 0, 1}, true); err != BLTErrOk {
+			t.Errorf("insertKey() = %v, want %v", err, BLTErrOk)
+		}
+		t.Logf("insertKey() = %v", BLTErrOk)
+		wg.Done()
+	}()
+	time.Sleep(10 * time.Millisecond)
+	go func() {
+		if err := bltree.deleteKey(key, 0); err != BLTErrOk {
+			t.Errorf("deleteKey() = %v, want %v", err, BLTErrOk)
+		}
+		t.Logf("deleteKey() = %v", BLTErrOk)
+		wg.Done()
+	}()
+	wg.Wait()
+
+	if found, _, _ := bltree.findKey(key, BtId); found != -1 {
+		t.Errorf("findKey() = %v, want %v", found, -1)
+	}
+}
+
 func TestBLTree_deleteMany(t *testing.T) {
-	log.SetOutput(io.Discard)
 	_ = os.Remove(`data/bltree_delete_many.db`)
 	mgr := NewBufMgr("data/bltree_delete_many.db", 15, 16*7)
 	bltree := NewBLTree(mgr)
 
-	keyTotal := 160000
+	keyTotal := 1600000
 
 	keys := make([][]byte, keyTotal)
 	for i := 0; i < keyTotal; i++ {
@@ -268,7 +297,6 @@ func TestBLTree_deleteMany(t *testing.T) {
 }
 
 func TestBLTree_deleteAll(t *testing.T) {
-	log.SetOutput(io.Discard)
 	_ = os.Remove(`data/bltree_delete_all.db`)
 	mgr := NewBufMgr("data/bltree_delete_all.db", 15, 16*7)
 	bltree := NewBLTree(mgr)
@@ -299,7 +327,6 @@ func TestBLTree_deleteAll(t *testing.T) {
 }
 
 func TestBLTree_deleteManyConcurrently(t *testing.T) {
-	log.SetOutput(io.Discard)
 	_ = os.Remove("data/bltree_delete_many_concurrently.db")
 	mgr := NewBufMgr("data/bltree_delete_many_concurrently.db", 15, 16*7)
 

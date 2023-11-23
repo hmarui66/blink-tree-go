@@ -407,17 +407,22 @@ func (tree *BLTree) findKey(key []byte, valMax int) (ret int, foundKey []byte, f
 //	0 - page needs splitting
 //	>0 new slot value
 func (tree *BLTree) cleanPage(set *PageSet, keyLen uint8, slot uint32, valLen uint8) uint32 {
+	//log.Printf("cleanPage: pageId=%d\n", set.latch.pageNo)
 	nxt := tree.mgr.pageDataSize
 	page := set.page
 	max := page.Cnt
 
-	if page.Min >= (max+2)*SlotSize+PageHeaderSize+uint32(keyLen)+1+uint32(valLen)+1 {
+	if page.Min >= (max+2)*SlotSize+uint32(keyLen)+1+uint32(valLen)+1 {
 		return slot
 	}
 
+	log.Printf("cleanPage: page.Garbage: %d, nxt: %d\n", page.Garbage, nxt)
 	// skip cleanup and proceed to split
 	// if there's not enough garbage to bother with.
-	if page.Garbage < nxt/5 {
+	afterCleanSize := (tree.mgr.pageDataSize - page.Min) - page.Garbage + (page.Act*2+1)*SlotSize
+
+	if int(tree.mgr.pageDataSize)-int(afterCleanSize) < int(tree.mgr.pageDataSize/5) {
+		log.Printf("cleanPage: not enough garbage to bother with\n")
 		return 0
 	}
 
@@ -477,6 +482,11 @@ func (tree *BLTree) cleanPage(set *PageSet, keyLen uint8, slot uint32, valLen ui
 		page.SetKeyOffset(idx, nxt)
 		page.SetTyp(idx, frame.Typ(cnt))
 
+		if nxt < idx*SlotSize {
+			log.Printf("cleanPage: nxt is under slot area!!! nxt: %d, idx: %d, keyLen: %d, valLen: %d, slot: %d, header: %v\n", nxt, idx, keyLen, valLen, slot, frame.PageHeader)
+			log.Printf("cleanPage: frame.Data: %v\n", frame.Data)
+		}
+
 		page.SetDead(idx, frame.Dead(cnt))
 		if !page.Dead(idx) {
 			page.Act++
@@ -487,7 +497,7 @@ func (tree *BLTree) cleanPage(set *PageSet, keyLen uint8, slot uint32, valLen ui
 	page.Cnt = idx
 
 	// see if page has enough space now, or does it need splitting?
-	if page.Min >= (idx+2)*SlotSize+PageHeaderSize+uint32(keyLen)+1+uint32(valLen)+1 {
+	if page.Min >= (idx+2)*SlotSize+uint32(keyLen)+1+uint32(valLen)+1 {
 		return newSlot
 	}
 
@@ -564,6 +574,7 @@ func (tree *BLTree) splitRoot(root *PageSet, right *LatchSet) BLTErr {
 // @return pool entry for new right page, unlocked
 // 1: ここがおかしい？
 func (tree *BLTree) splitPage(set *PageSet) uint {
+	//log.Panicf("splitPage: set.page.Cnt: %d, Data: %v\n", set.page.Cnt, set.page.Data)
 	nxt := tree.mgr.pageDataSize
 	lvl := set.page.Lvl
 	var right PageSet
@@ -573,9 +584,6 @@ func (tree *BLTree) splitPage(set *PageSet) uint {
 	max := set.page.Cnt
 	cnt := max / 2
 	idx := uint32(0)
-	if set.page.Cnt > 1500 {
-		log.Panicf("set.page.Cnt too big. data: %v\n", set.page.Data)
-	}
 
 	originalPage := NewPage(tree.mgr.pageDataSize)
 	MemCpyPage(originalPage, set.page)
@@ -786,9 +794,6 @@ func (tree *BLTree) insertSlot(
 	if idx == set.page.Cnt {
 		idx += 2
 		set.page.Cnt += 2
-		if set.page.Cnt > 1500 {
-			log.Panicf("set.page.Cnt too big. data: %v\n", set.page.Data)
-		}
 		librarian = 2
 	} else {
 		librarian = 1
@@ -903,7 +908,7 @@ func (tree *BLTree) insertKey(key []byte, lvl uint8, value [BtId]byte, uniq bool
 		if set.page.Dead(slot) {
 			set.page.Act++
 		}
-		//set.page.Garbage += len(val) = len(value)
+		//set.page.Garbage += len(val) - len(value)
 		set.latch.dirty = true
 		set.page.SetDead(slot, false)
 		set.page.SetValue(value[:], slot)

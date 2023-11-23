@@ -348,7 +348,7 @@ func TestCopyPage(t *testing.T) {
 	}
 }
 func TestCheckPage(t *testing.T) {
-	f, err := os.OpenFile("data/page.db", os.O_RDWR, 0666)
+	f, err := os.OpenFile("data/page4.db", os.O_RDWR, 0666)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,12 +389,14 @@ func TestCheckPage(t *testing.T) {
 			log.Panicf("invalid dead: %v", err)
 		}
 		slotNum++
-		fmt.Printf("slot: %v, offset: %v, type: %v, dead: %v\n", slotNum, offsetBytes, typ, dead)
 		var offset uint32
 		_ = binary.Read(bytes.NewBuffer(offsetBytes[:]), binary.LittleEndian, &offset)
 		if offset > uint32(len(data)) {
-			log.Panicf("invalid offset: %v", offset)
+			log.Panicf("invalid offset: slot: %v, offset: %v, offsetBytes: %v, type: %v, dead: %v\n", slotNum, offset, offsetBytes, typ, dead)
 		}
+		keyLen := uint32(data[offset])
+		keyBytes := data[offset+1 : offset+1+keyLen]
+		fmt.Printf("slot: %v, offset: %v, offsetBytes: %v, type: %v, dead: %v, key: %v\n", slotNum, offset, offsetBytes, typ, dead, keyBytes)
 	}
 
 }

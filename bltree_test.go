@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -446,4 +447,46 @@ func TestBLTree_restart(t *testing.T) {
 			t.Errorf("findKey() = %v, want %v", foundKey, bs)
 		}
 	}
+}
+
+func TestBLTree_cleanPage(t *testing.T) {
+	_ = os.Remove("data/bltree_clean_page.db")
+	mgr := NewBufMgr("data/bltree_clean_page.db", 15, 16*7)
+	bltree := NewBLTree(mgr)
+
+	f, err := os.OpenFile("testdata/page_for_clean_page", os.O_RDWR, 0666)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// ファイルの数値をすべてバイト配列に読み込む
+	// ファイルの内容はすべて文字列で、空白文字で区切られている
+	var data []byte
+	for {
+		var b byte
+		_, err := fmt.Fscanf(f, "%d", &b)
+		if err != nil {
+			break
+		}
+		data = append(data, b)
+	}
+	fmt.Printf("size: %v\n", len(data))
+
+	set := PageSet{
+		page:  NewPage(mgr.pageDataSize),
+		latch: &LatchSet{},
+	}
+	copy(set.page.Data, data)
+	set.page.PageHeader = PageHeader{
+		Cnt:     1214,
+		Act:     1170,
+		Min:     7302,
+		Garbage: 6720,
+		Bits:    15,
+		Free:    false,
+		Lvl:     0,
+		Kill:    false,
+		Right:   [BtId]byte{0, 0, 0, 0, 1, 74},
+	}
+	bltree.cleanPage(&set, 8, 439, BtId)
 }

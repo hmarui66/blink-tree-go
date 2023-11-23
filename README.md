@@ -2,12 +2,6 @@
 
 blink tree implementation in go
 
-## known issues
-
-- sometimes crashes in tests that perform concurrent deletion and insertion
-  - `TestBLTree_deleteManyConcurrently` in `bltree_test.go`
-- failed to restart
-
 ## reference
 
 - https://github.com/PLW/blink-tree-logic

@@ -457,7 +457,8 @@ func (mgr *BufMgr) NewPage(set *PageSet, contents *Page, reads *uint, writes *ui
 		return mgr.err
 	}
 
-	set.page.setContents(contents)
+	set.page.Data = make([]byte, mgr.pageDataSize)
+	MemCpyPage(set.page, contents)
 	set.latch.dirty = true
 	mgr.err = BLTErrOk
 	return mgr.err

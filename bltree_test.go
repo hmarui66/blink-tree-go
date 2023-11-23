@@ -3,8 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
-	"log"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -80,6 +79,48 @@ func TestBLTree_t(t *testing.T) {
 	t.Log(res)
 }
 
+func TestBLTree_cleanPage(t *testing.T) {
+	_ = os.Remove("data/bltree_clean_page.db")
+	mgr := NewBufMgr("data/bltree_clean_page.db", 15, 16*7)
+	bltree := NewBLTree(mgr)
+
+	f, err := os.OpenFile("testdata/page_for_clean", os.O_RDWR, 0666)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// ファイルの数値をすべてバイト配列に読み込む
+	// ファイルの内容はすべて文字列で、空白文字で区切られている
+	var data []byte
+	for {
+		var b byte
+		_, err := fmt.Fscanf(f, "%d", &b)
+		if err != nil {
+			break
+		}
+		data = append(data, b)
+	}
+	fmt.Printf("size: %v\n", len(data))
+
+	set := PageSet{
+		page:  NewPage(mgr.pageDataSize),
+		latch: &LatchSet{},
+	}
+	copy(set.page.Data, data)
+	set.page.PageHeader = PageHeader{
+		Cnt:     1214,
+		Act:     1170,
+		Min:     7302,
+		Garbage: 6720,
+		Bits:    15,
+		Free:    false,
+		Lvl:     0,
+		Kill:    false,
+		Right:   [BtId]byte{0, 0, 0, 0, 1, 74},
+	}
+	bltree.cleanPage(&set, 8, 439, BtId)
+}
+
 func TestBLTree_insert_and_find(t *testing.T) {
 	mgr := NewBufMgr("data/bltree_insert_and_find.db", 15, 20)
 	bltree := NewBLTree(mgr)
@@ -98,7 +139,6 @@ func TestBLTree_insert_and_find(t *testing.T) {
 }
 
 func TestBLTree_insert_and_find_many(t *testing.T) {
-	log.SetOutput(io.Discard)
 	_ = os.Remove(`data/bltree_insert_and_find_many.db`)
 	mgr := NewBufMgr("data/bltree_insert_and_find_many.db", 15, 48)
 	bltree := NewBLTree(mgr)
@@ -123,7 +163,6 @@ func TestBLTree_insert_and_find_many(t *testing.T) {
 }
 
 func TestBLTree_insert_and_find_concurrently(t *testing.T) {
-	log.SetOutput(io.Discard)
 	_ = os.Remove(`data/insert_and_find_concurrently.db`)
 	mgr := NewBufMgr("data/insert_and_find_concurrently.db", 15, 16*7)
 
@@ -140,7 +179,6 @@ func TestBLTree_insert_and_find_concurrently(t *testing.T) {
 }
 
 func TestBLTree_insert_and_find_concurrently_by_little_endian(t *testing.T) {
-	log.SetOutput(io.Discard)
 	_ = os.Remove(`data/insert_and_find_concurrently_by_little_endian.db`)
 	mgr := NewBufMgr("data/insert_and_find_concurrently_by_little_endian.db", 15, 16*70)
 
@@ -229,7 +267,6 @@ func TestBLTree_delete(t *testing.T) {
 }
 
 func TestBLTree_deleteMany(t *testing.T) {
-	log.SetOutput(io.Discard)
 	_ = os.Remove(`data/bltree_delete_many.db`)
 	mgr := NewBufMgr("data/bltree_delete_many.db", 15, 16*7)
 	bltree := NewBLTree(mgr)
@@ -268,7 +305,6 @@ func TestBLTree_deleteMany(t *testing.T) {
 }
 
 func TestBLTree_deleteAll(t *testing.T) {
-	log.SetOutput(io.Discard)
 	_ = os.Remove(`data/bltree_delete_all.db`)
 	mgr := NewBufMgr("data/bltree_delete_all.db", 15, 16*7)
 	bltree := NewBLTree(mgr)
@@ -299,7 +335,6 @@ func TestBLTree_deleteAll(t *testing.T) {
 }
 
 func TestBLTree_deleteManyConcurrently(t *testing.T) {
-	log.SetOutput(io.Discard)
 	_ = os.Remove("data/bltree_delete_many_concurrently.db")
 	mgr := NewBufMgr("data/bltree_delete_many_concurrently.db", 15, 16*7)
 

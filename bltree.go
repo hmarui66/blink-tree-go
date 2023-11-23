@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"sync/atomic"
 )
 
@@ -86,13 +87,13 @@ func (tree *BLTree) fixFence(set *PageSet, lvl uint8) BLTErr {
 	// cache new fence value
 	leftKey := set.page.Key(set.page.Cnt)
 
+	var value [BtId]byte
+	PutID(&value, set.latch.pageNo)
+
 	tree.mgr.LockPage(LockParent, set.latch)
 	tree.mgr.UnlockPage(LockWrite, set.latch)
 
 	// insert new (now smaller) fence key
-
-	var value [BtId]byte
-	PutID(&value, set.latch.pageNo)
 
 	if err := tree.insertKey(leftKey, lvl+1, value, true); err != BLTErrOk {
 		return err
@@ -191,15 +192,16 @@ func (tree *BLTree) deletePage(set *PageSet, mode BLTLockMode) BLTErr {
 	right.latch.dirty = true
 	right.page.Kill = true
 
+	// redirect higher key directly to our new node contents
+	var value [BtId]byte
+	PutID(&value, set.latch.pageNo)
+
 	tree.mgr.LockPage(LockParent, right.latch)
 	tree.mgr.UnlockPage(LockWrite, right.latch)
 	tree.mgr.UnlockPage(mode, right.latch)
 	tree.mgr.LockPage(LockParent, set.latch)
 	tree.mgr.UnlockPage(LockWrite, set.latch)
 
-	// redirect higher key directly to our new node contents
-	var value [BtId]byte
-	PutID(&value, set.latch.pageNo)
 	if err := tree.insertKey(higherFence, set.page.Lvl+1, value, true); err != BLTErrOk {
 		return err
 	}
@@ -241,10 +243,10 @@ func (tree *BLTree) deleteKey(key []byte, lvl uint8) BLTErr {
 	fence := slot == set.page.Cnt
 
 	// if key is found delete it, otherwise ignore request
-	tree.found = KeyCmp(ptr, key) == 0
-	if tree.found {
-		tree.found = !set.page.Dead(slot)
-		if tree.found {
+	found := KeyCmp(ptr, key) == 0
+	if found {
+		found = !set.page.Dead(slot)
+		if found {
 			val := *set.page.Value(slot)
 			set.page.SetDead(slot, true)
 			set.page.Garbage += uint32(1+len(ptr)) + uint32(1+len(val))
@@ -267,7 +269,7 @@ func (tree *BLTree) deleteKey(key []byte, lvl uint8) BLTErr {
 	}
 
 	// did we delete a fence key in an upper level?
-	if tree.found && lvl > 0 && set.page.Act > 0 && fence {
+	if found && lvl > 0 && set.page.Act > 0 && fence {
 		if err := tree.fixFence(&set, lvl); err != BLTErrOk {
 			return err
 		} else {
@@ -402,13 +404,15 @@ func (tree *BLTree) cleanPage(set *PageSet, keyLen uint8, slot uint32, valLen ui
 	page := set.page
 	max := page.Cnt
 
-	if page.Min >= (max+2)*SlotSize+PageHeaderSize+uint32(keyLen)+1+uint32(valLen)+1 {
+	if page.Min >= (max+2)*SlotSize+uint32(keyLen)+1+uint32(valLen)+1 {
 		return slot
 	}
 
 	// skip cleanup and proceed to split
 	// if there's not enough garbage to bother with.
-	if page.Garbage < nxt/5 {
+	afterCleanSize := (tree.mgr.pageDataSize - page.Min) - page.Garbage + (page.Act*2+1)*SlotSize
+
+	if int(tree.mgr.pageDataSize)-int(afterCleanSize) < int(tree.mgr.pageDataSize/5) {
 		return 0
 	}
 
@@ -462,6 +466,10 @@ func (tree *BLTree) cleanPage(set *PageSet, keyLen uint8, slot uint32, valLen ui
 		page.SetKeyOffset(idx, nxt)
 		page.SetTyp(idx, frame.Typ(cnt))
 
+		if nxt < idx*SlotSize {
+			log.Printf("cleanPage: nxt overlaps with the slot area!!! nxt: %d, idx: %d, keyLen: %d, valLen: %d, slot: %d, frame.header: %v, frame.data: %v\n", nxt, idx, keyLen, valLen, slot, frame.PageHeader, frame.Data)
+		}
+
 		page.SetDead(idx, frame.Dead(cnt))
 		if !page.Dead(idx) {
 			page.Act++
@@ -472,7 +480,7 @@ func (tree *BLTree) cleanPage(set *PageSet, keyLen uint8, slot uint32, valLen ui
 	page.Cnt = idx
 
 	// see if page has enough space now, or does it need splitting?
-	if page.Min >= (idx+2)*SlotSize+PageHeaderSize+uint32(keyLen)+1+uint32(valLen)+1 {
+	if page.Min >= (idx+2)*SlotSize+uint32(keyLen)+1+uint32(valLen)+1 {
 		return newSlot
 	}
 
@@ -714,7 +722,7 @@ func (tree *BLTree) insertSlot(
 	}
 
 	// copy value onto page
-	set.page.Min -= BtId + 1
+	set.page.Min -= uint32(len(value)) + 1
 	copy(set.page.Data[set.page.Min:], append([]byte{byte(len(value))}, value[:]...))
 
 	// copy key onto page
@@ -848,7 +856,7 @@ func (tree *BLTree) insertKey(key []byte, lvl uint8, value [BtId]byte, uniq bool
 		if set.page.Dead(slot) {
 			set.page.Act++
 		}
-		//set.page.Garbage += len(val) = len(value)
+		//set.page.Garbage += len(val) - len(value)
 		set.latch.dirty = true
 		set.page.SetDead(slot, false)
 		set.page.SetValue(value[:], slot)

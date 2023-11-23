@@ -432,8 +432,13 @@ func TestBufMgr_NewPage(t *testing.T) {
 				t.Errorf("NewPage() failed to increment alloc right = %d, want %d", got, initialAllocRight+1)
 			}
 
-			if got := tt.args.pageSet.page.Data; !bytes.Equal(got, tt.args.page.Data) {
-				t.Errorf("NewPage() failed to map contents = %d, want %d", got, tt.args.page.Data)
+			wantData := make([]byte, mgr.pageDataSize)
+			for i := range tt.args.page.Data {
+				wantData[i] = tt.args.page.Data[i]
+			}
+
+			if got := tt.args.pageSet.page.Data; !bytes.Equal(got, wantData) {
+				t.Errorf("NewPage() failed to map contents = %d, want %d", got, wantData)
 			}
 
 			// assert latch data

@@ -24,7 +24,7 @@ func TestBLTree_collapseRoot(t *testing.T) {
 		{
 			name: "collapse root",
 			fields: fields{
-				mgr: NewBufMgr("data/collapse_root_test.db", 15, 20),
+				mgr: NewBufMgr("data/collapse_root_test.db", 13, 20),
 			},
 			want: BLTErrOk,
 		},
@@ -66,20 +66,7 @@ func TestBLTree_collapseRoot(t *testing.T) {
 	}
 }
 
-func TestBLTree_t(t *testing.T) {
-	a := func() (foundKey []byte) {
-		ptr := []byte{1, 1, 1, 1}
-		// key に ptr の全データをコピーして、スライスのながさも ptr に合わせる
-		foundKey = make([]byte, len(ptr))
-		copy(foundKey, ptr)
-		return foundKey
-	}
-
-	res := a()
-	t.Log(res)
-}
-
-func TestBLTree_cleanPage(t *testing.T) {
+func TestBLTree_cleanPage_full_page(t *testing.T) {
 	_ = os.Remove("data/bltree_clean_page.db")
 	mgr := NewBufMgr("data/bltree_clean_page.db", 15, 16*7)
 	bltree := NewBLTree(mgr)
@@ -118,11 +105,14 @@ func TestBLTree_cleanPage(t *testing.T) {
 		Kill:    false,
 		Right:   [BtId]byte{0, 0, 0, 0, 1, 74},
 	}
-	bltree.cleanPage(&set, 8, 439, BtId)
+	res := bltree.cleanPage(&set, 8, 439, BtId)
+	if res != 0 {
+		t.Errorf("cleanPage() = %v, want %v", res, 0)
+	}
 }
 
 func TestBLTree_insert_and_find(t *testing.T) {
-	mgr := NewBufMgr("data/bltree_insert_and_find.db", 15, 20)
+	mgr := NewBufMgr("data/bltree_insert_and_find.db", 13, 20)
 	bltree := NewBLTree(mgr)
 	if valLen, _, _ := bltree.findKey([]byte{1, 1, 1, 1}, BtId); valLen >= 0 {
 		t.Errorf("findKey() = %v, want %v", valLen, -1)
@@ -140,7 +130,7 @@ func TestBLTree_insert_and_find(t *testing.T) {
 
 func TestBLTree_insert_and_find_many(t *testing.T) {
 	_ = os.Remove(`data/bltree_insert_and_find_many.db`)
-	mgr := NewBufMgr("data/bltree_insert_and_find_many.db", 15, 48)
+	mgr := NewBufMgr("data/bltree_insert_and_find_many.db", 13, 48)
 	bltree := NewBLTree(mgr)
 
 	num := uint64(160000)
@@ -164,7 +154,7 @@ func TestBLTree_insert_and_find_many(t *testing.T) {
 
 func TestBLTree_insert_and_find_concurrently(t *testing.T) {
 	_ = os.Remove(`data/insert_and_find_concurrently.db`)
-	mgr := NewBufMgr("data/insert_and_find_concurrently.db", 15, 16*7)
+	mgr := NewBufMgr("data/insert_and_find_concurrently.db", 13, 16*7)
 
 	keyTotal := 1600000
 
@@ -180,9 +170,9 @@ func TestBLTree_insert_and_find_concurrently(t *testing.T) {
 
 func TestBLTree_insert_and_find_concurrently_by_little_endian(t *testing.T) {
 	_ = os.Remove(`data/insert_and_find_concurrently_by_little_endian.db`)
-	mgr := NewBufMgr("data/insert_and_find_concurrently_by_little_endian.db", 15, 16*70)
+	mgr := NewBufMgr("data/insert_and_find_concurrently_by_little_endian.db", 13, 16*7)
 
-	keyTotal := 16000000
+	keyTotal := 1600000
 
 	keys := make([][]byte, keyTotal)
 	for i := 0; i < keyTotal; i++ {
@@ -248,7 +238,7 @@ func insertAndFindConcurrently(t *testing.T, routineNum int, mgr *BufMgr, keys [
 }
 
 func TestBLTree_delete(t *testing.T) {
-	mgr := NewBufMgr("data/bltree_delete.db", 15, 20)
+	mgr := NewBufMgr("data/bltree_delete.db", 13, 20)
 	bltree := NewBLTree(mgr)
 
 	key := []byte{1, 1, 1, 1}
@@ -268,7 +258,7 @@ func TestBLTree_delete(t *testing.T) {
 
 func TestBLTree_deleteMany(t *testing.T) {
 	_ = os.Remove(`data/bltree_delete_many.db`)
-	mgr := NewBufMgr("data/bltree_delete_many.db", 15, 16*7)
+	mgr := NewBufMgr("data/bltree_delete_many.db", 13, 16*7)
 	bltree := NewBLTree(mgr)
 
 	keyTotal := 160000
@@ -306,7 +296,7 @@ func TestBLTree_deleteMany(t *testing.T) {
 
 func TestBLTree_deleteAll(t *testing.T) {
 	_ = os.Remove(`data/bltree_delete_all.db`)
-	mgr := NewBufMgr("data/bltree_delete_all.db", 15, 16*7)
+	mgr := NewBufMgr("data/bltree_delete_all.db", 13, 16*7)
 	bltree := NewBLTree(mgr)
 
 	keyTotal := 1600000
@@ -336,7 +326,7 @@ func TestBLTree_deleteAll(t *testing.T) {
 
 func TestBLTree_deleteManyConcurrently(t *testing.T) {
 	_ = os.Remove("data/bltree_delete_many_concurrently.db")
-	mgr := NewBufMgr("data/bltree_delete_many_concurrently.db", 15, 16*7)
+	mgr := NewBufMgr("data/bltree_delete_many_concurrently.db", 13, 16*7)
 
 	keyTotal := 1600000
 	routineNum := 7
@@ -420,7 +410,7 @@ func TestBLTree_deleteManyConcurrently(t *testing.T) {
 
 func TestBLTree_restart(t *testing.T) {
 	_ = os.Remove(`data/bltree_restart.db`)
-	mgr := NewBufMgr("data/bltree_restart.db", 15, 48)
+	mgr := NewBufMgr("data/bltree_restart.db", 13, 48)
 	bltree := NewBLTree(mgr)
 
 	firstNum := uint64(1000)

@@ -10,12 +10,12 @@ type BLTree struct {
 	cursor *Page   // cached frame for start/next (never mapped)
 	// note: not use singleton frame to avoid race condition
 	// frame      *Page          // spare frame for the page split (never mapped)
-	cursorPage uid            // current cursor page number
-	found      bool           // last delete or insert was found
-	err        BLTErr         //last error
-	key        [KeyArray]byte // last found complete key
-	reads      uint           // number of reads from the btree
-	writes     uint           // number of writes to the btree
+	cursorPage uid // current cursor page number
+	//found      bool   // last delete or insert was found (Note: not used)
+	err BLTErr //last error
+	//key        [KeyArray]byte // last found complete key (Note: not used)
+	reads  uint // number of reads from the btree
+	writes uint // number of writes to the btree
 }
 
 /*
@@ -218,7 +218,7 @@ func (tree *BLTree) deletePage(set *PageSet, mode BLTLockMode) BLTErr {
 	tree.mgr.FreePage(&right)
 	tree.mgr.UnlockPage(LockParent, set.latch)
 	tree.mgr.UnpinLatch(set.latch)
-	tree.found = true
+	//tree.found = true
 	return BLTErrOk
 }
 
@@ -294,10 +294,6 @@ func (tree *BLTree) deleteKey(key []byte, lvl uint8) BLTErr {
 	tree.mgr.UnlockPage(LockWrite, set.latch)
 	tree.mgr.UnpinLatch(set.latch)
 	return BLTErrOk
-}
-
-func (tree *BLTree) foundKey() [KeyArray]byte {
-	return tree.key
 }
 
 // findNext
@@ -781,7 +777,6 @@ func (tree *BLTree) insertSlot(
 // newDup
 func (tree *BLTree) newDup() uid {
 	return uid(atomic.AddUint64(&tree.mgr.pageZero.dups, 1))
-
 }
 
 // insertKey insert new key into the btree at given level. either add a new key or update/add an existing one

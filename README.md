@@ -12,3 +12,25 @@ blink tree implementation in go
 - [Concurrency control and recovery for balanced Blink trees](https://www.researchgate.net/journal/The-VLDB-Journal-0949-877X)
 - [A Blink Tree method and latch protocol for synchronous node deletion in a high
   concurrency environment](https://arxiv.org/ftp/arxiv/papers/1009/1009.2764.pdf)
+
+## usage
+
+```go
+mgr := NewBufMgr("data/sample.db", 13, 20)
+bltree := NewBLTree(mgr)
+
+bltree.insertKey([]byte{1, 1, 1, 1}, 0, [BtId]byte{0, 0, 0, 0, 0, 1}, true)
+
+_, foundKey, _ := bltree.findKey([]byte{1, 1, 1, 1}, BtId)
+fmt.Println(bytes.Compare(foundKey, []byte{1, 1, 1, 1}) == 0) // true
+```
+
+## Profiling in TestBLTree_deleteManyConcurrently
+
+### CPU
+
+![flamegraph-cpu.png](img%2Fflamegraph-cpu.png)
+
+### Memory
+
+![flamegraph-memory.png](img%2Fflamegraph-memory.png)

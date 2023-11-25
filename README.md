@@ -19,10 +19,10 @@ blink tree implementation in go
 mgr := NewBufMgr("data/sample.db", 13, 20)
 bltree := NewBLTree(mgr)
 
-bltree.insertKey([]byte{1, 1, 1, 1}, 0, [BtId]byte{0, 0, 0, 0, 0, 1}, true)
+bltree.insertKey([]byte{1, 2, 3, 4}, 0, [6]byte{0, 0, 0, 0, 0, 1}, true)
 
-_, foundKey, _ := bltree.findKey([]byte{1, 1, 1, 1}, BtId)
-fmt.Println(bytes.Compare(foundKey, []byte{1, 1, 1, 1}) == 0) // true
+_, foundKey, _ := bltree.findKey([]byte{1, 2, 3, 4}, 6)
+fmt.Println(bytes.Compare(foundKey, []byte{1, 2, 3, 4}) == 0) // true
 ```
 
 ## Profiling in TestBLTree_deleteManyConcurrently
